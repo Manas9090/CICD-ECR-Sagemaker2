@@ -17,7 +17,7 @@ jobs:
       SAGEMAKER_ENDPOINT_NAME: iris-endpoint
 
     steps:
-      # Step 1: Checkout repo
+      # Step 1: Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -48,16 +48,21 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Step 6: Login to Amazon ECR
+      # Step 6: Login to Amazon ECR using full URI secret
       - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        run: |
+          echo ${{ secrets.AWS_SECRET_ACCESS_KEY }} | docker login \
+          --username AWS \
+          --password-stdin ${{ secrets.ECR_URI }}
 
       # Step 7: Build and push Docker image
       - name: Build and push Docker image
         run: |
-          docker build -t ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }} .
-          docker push ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
+          IMAGE_URI=${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
+          echo "Building Docker image $IMAGE_URI..."
+          docker build -t $IMAGE_URI .
+          echo "Pushing Docker image $IMAGE_URI..."
+          docker push $IMAGE_URI
 
       # Step 8: Deploy to SageMaker
       - name: Deploy to SageMaker
@@ -71,16 +76,12 @@ jobs:
 
           model_name = '${{ env.SAGEMAKER_MODEL_NAME }}'
           endpoint_name = '${{ env.SAGEMAKER_ENDPOINT_NAME }}'
-          image_uri = '${IMAGE_URI}'
 
           # Create or update model
           try:
               sm.create_model(
                   ModelName=model_name,
-                  PrimaryContainer={
-                      'Image': image_uri,
-                      'Mode': 'SingleModel'
-                  },
+                  PrimaryContainer={'Image': IMAGE_URI, 'Mode': 'SingleModel'},
                   ExecutionRoleArn='${{ secrets.SAGEMAKER_ROLE_ARN }}'
               )
               print("✅ Model created.")
@@ -92,14 +93,12 @@ jobs:
           try:
               sm.create_endpoint_config(
                   EndpointConfigName=endpoint_config_name,
-                  ProductionVariants=[
-                      {
-                          'VariantName': 'AllTraffic',
-                          'ModelName': model_name,
-                          'InitialInstanceCount': 1,
-                          'InstanceType': 'ml.t2.medium',
-                      },
-                  ],
+                  ProductionVariants=[{
+                      'VariantName': 'AllTraffic',
+                      'ModelName': model_name,
+                      'InitialInstanceCount': 1,
+                      'InstanceType': 'ml.t2.medium',
+                  }],
               )
               print("✅ Endpoint config created.")
           except sm.exceptions.ResourceInUse:
