@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: us-east-1            # Match your ECR repository region
+      AWS_REGION: us-east-1            # Must match your ECR repository region
       IMAGE_TAG: latest
       SAGEMAKER_MODEL_NAME: iris-model
       SAGEMAKER_ENDPOINT_NAME: iris-endpoint
