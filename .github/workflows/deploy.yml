@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: ap-south-1
+      AWS_REGION: us-east-1            # <-- Match this with your ECR region
       IMAGE_TAG: latest
       SAGEMAKER_MODEL_NAME: iris-model
       SAGEMAKER_ENDPOINT_NAME: iris-endpoint
@@ -48,12 +48,12 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Step 6: Login to Amazon ECR (registry only!)
+      # Step 6: Login to Amazon ECR using AWS CLI
       - name: Login to Amazon ECR
         run: |
-          # Extract registry from full ECR URI
           ECR_REGISTRY=$(echo ${{ secrets.ECR_URI }} | cut -d'/' -f1)
-          echo ${{ secrets.AWS_SECRET_ACCESS_KEY }} | docker login \
+          echo "Logging into ECR registry $ECR_REGISTRY"
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login \
             --username AWS --password-stdin $ECR_REGISTRY
 
       # Step 7: Build and push Docker image
