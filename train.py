@@ -1,10 +1,13 @@
-# train.py
 import os
 import joblib
 from sklearn.datasets import load_iris
 from sklearn.ensemble import RandomForestClassifier
 
 def train_and_save_model():
+    """
+    Train a simple RandomForest model on the Iris dataset
+    and save it to the 'model/' directory.
+    """
     # Load dataset
     iris = load_iris()
     X, y = iris.data, iris.target
@@ -14,9 +17,14 @@ def train_and_save_model():
     clf.fit(X, y)
     print("✅ Model trained successfully!")
 
+    # Ensure model directory exists
+    model_dir = "model"
+    if not os.path.exists(model_dir):
+        os.makedirs(model_dir, exist_ok=True)
+        print(f"📁 Created directory: {model_dir}")
+
     # Save model
-    os.makedirs("model", exist_ok=True)
-    model_path = os.path.join("model", "model.pkl")
+    model_path = os.path.join(model_dir, "model.pkl")
     joblib.dump(clf, model_path)
     print(f"💾 Model saved at {model_path}")
 
