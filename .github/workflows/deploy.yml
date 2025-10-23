@@ -3,22 +3,21 @@ name: CI/CD SageMaker Deployment via Docker
 on:
   push:
     branches:
-      - main   # Triggers when you push to main
-  workflow_dispatch:  # Manual trigger support
+      - main
+  workflow_dispatch:
 
 jobs:
   build-train-deploy:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: ap-south-1               # Change region if required
-      ECR_REPOSITORY: iris-sagemaker       # Your ECR repo name
+      AWS_REGION: ap-south-1
       IMAGE_TAG: latest
       SAGEMAKER_MODEL_NAME: iris-model
       SAGEMAKER_ENDPOINT_NAME: iris-endpoint
 
     steps:
-      # Step 1: Checkout code
+      # Step 1: Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -34,7 +33,7 @@ jobs:
           pip install -r requirements.txt
           pip install boto3 awscli
 
-      # Step 4: Train the model and ensure model directory exists
+      # Step 4: Train the model
       - name: Train the model
         run: |
           mkdir -p model
@@ -55,19 +54,15 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       # Step 7: Build and push Docker image
-      - name: Build, tag, and push Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+      - name: Build and push Docker image
         run: |
-          docker build -t $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} .
-          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          docker build -t ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }} .
+          docker push ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
 
       # Step 8: Deploy to SageMaker
       - name: Deploy to SageMaker
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
-          IMAGE_URI=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          IMAGE_URI=${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
           echo "Deploying image $IMAGE_URI to SageMaker..."
 
           python - <<EOF
