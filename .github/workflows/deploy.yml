@@ -1,74 +1,63 @@
-name: CI/CD SageMaker Deployment via Docker
+# Step 8: Deploy or update SageMaker endpoint
+- name: Deploy to SageMaker
+  env:
+    IMAGE_URI: ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
+    SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+    AWS_REGION: ${{ env.AWS_REGION }}
+    SAGEMAKER_MODEL_NAME: ${{ env.SAGEMAKER_MODEL_NAME }}
+    SAGEMAKER_ENDPOINT_NAME: ${{ env.SAGEMAKER_ENDPOINT_NAME }}
+  run: |
+    echo "Deploying image $IMAGE_URI to SageMaker..."
+    python - <<PYTHON
+import os
+import boto3
 
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+sm = boto3.client('sagemaker', region_name=os.environ['AWS_REGION'])
 
-jobs:
-  build-train-deploy:
-    runs-on: ubuntu-latest
+model_name = os.environ['SAGEMAKER_MODEL_NAME']
+endpoint_name = os.environ['SAGEMAKER_ENDPOINT_NAME']
+image_uri = os.environ['IMAGE_URI']
+role_arn = os.environ['SAGEMAKER_ROLE_ARN']
 
-    env:
-      AWS_REGION: us-east-1
-      IMAGE_TAG: latest
-      SAGEMAKER_MODEL_NAME: iris-model
-      SAGEMAKER_ENDPOINT_NAME: iris-endpoint
+# Create or update model
+try:
+    sm.create_model(
+        ModelName=model_name,
+        PrimaryContainer={'Image': image_uri, 'Mode': 'SingleModel'},
+        ExecutionRoleArn=role_arn
+    )
+    print("✅ Model created.")
+except sm.exceptions.ResourceInUse:
+    print("🔁 Model already exists. Skipping creation.")
 
-    steps:
-      # Step 1: Checkout code
-      - name: Checkout code
-        uses: actions/checkout@v4
+# Create or update endpoint config
+endpoint_config_name = f"{model_name}-config"
+try:
+    sm.create_endpoint_config(
+        EndpointConfigName=endpoint_config_name,
+        ProductionVariants=[{
+            'VariantName': 'AllTraffic',
+            'ModelName': model_name,
+            'InitialInstanceCount': 1,
+            'InstanceType': 'ml.t2.medium',
+        }]
+    )
+    print("✅ Endpoint config created.")
+except sm.exceptions.ResourceInUse:
+    print("🔁 Endpoint config already exists. Skipping creation.")
 
-      # Step 2: Set up Python
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # Step 3: Install dependencies
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install boto3 awscli scikit-learn joblib
-
-      # Step 4: Train the model
-      - name: Train the model
-        run: |
-          python train.py
-          ls -R model/
-
-      # Step 5: Configure AWS credentials
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      # Step 6: Login to Amazon ECR
-      - name: Login to Amazon ECR
-        run: |
-          ECR_REGISTRY=$(echo ${{ secrets.ECR_URI }} | cut -d'/' -f1)
-          echo "Logging into ECR registry $ECR_REGISTRY"
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login \
-            --username AWS --password-stdin $ECR_REGISTRY
-
-      # Step 7: Build and push Docker image to ECR
-      - name: Build and push Docker image
-        run: |
-          IMAGE_URI=${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
-          echo "Building Docker image $IMAGE_URI..."
-          docker build -t $IMAGE_URI .
-          echo "Pushing Docker image $IMAGE_URI..."
-          docker push $IMAGE_URI
-
-      # Step 8: Deploy or update SageMaker endpoint
-      - name: Deploy to SageMaker
-        env:
-          IMAGE_URI: ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
-          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-          AWS_REGION: ${{ env.AWS_REGION }}
-          SAGEMAKER_MODEL_NAME: ${{ env.SAGEMAKER_MODEL_NAME }}
-          SAGEMAKER_ENDPOINT_NAME: ${{ env.SAGEMAKER_ENDP_
+# Create or update endpoint
+try:
+    sm.create_endpoint(
+        EndpointName=endpoint_name,
+        EndpointConfigName=endpoint_config_name
+    )
+    print("🚀 Endpoint creation started.")
+except sm.exceptions.ResourceInUse:
+    print("🔁 Updating existing endpoint...")
+    sm.update_endpoint(
+        EndpointName=endpoint_name,
+        EndpointConfigName=endpoint_config_name
+    )
+    print("✅ Endpoint update initiated.")
+PYTHON
