@@ -17,7 +17,7 @@ jobs:
       SAGEMAKER_ENDPOINT_NAME: iris-endpoint
 
     steps:
-      # Step 1: Checkout code
+      # Step 1: Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -37,7 +37,7 @@ jobs:
       - name: Train the model
         run: |
           mkdir -p model
-          python main.py
+          python train.py
           ls -R model/
 
       # Step 5: Configure AWS credentials
@@ -52,17 +52,13 @@ jobs:
       - name: Login to Amazon ECR
         run: |
           ECR_REGISTRY=$(echo ${{ secrets.ECR_URI }} | cut -d'/' -f1)
-          echo "Logging into ECR registry $ECR_REGISTRY"
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login \
-            --username AWS --password-stdin $ECR_REGISTRY
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $ECR_REGISTRY
 
       # Step 7: Build and push Docker image to ECR
       - name: Build and push Docker image
         run: |
           IMAGE_URI=${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
-          echo "Building Docker image $IMAGE_URI..."
           docker build -t $IMAGE_URI .
-          echo "Pushing Docker image $IMAGE_URI..."
           docker push $IMAGE_URI
 
       # Step 8: Deploy to SageMaker
@@ -73,4 +69,58 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           SAGEMAKER_MODEL_NAME: ${{ env.SAGEMAKER_MODEL_NAME }}
           SAGEMAKER_ENDPOINT_NAME: ${{ env.SAGEMAKER_ENDPOINT_NAME }}
-        run: python deploy.py
+        run: |
+          echo "Deploying image $IMAGE_URI to SageMaker..."
+          python - <<PYTHON
+import os
+import boto3
+
+sm = boto3.client('sagemaker', region_name=os.environ['AWS_REGION'])
+
+model_name = os.environ['SAGEMAKER_MODEL_NAME']
+endpoint_name = os.environ['SAGEMAKER_ENDPOINT_NAME']
+image_uri = os.environ['IMAGE_URI']
+role_arn = os.environ['SAGEMAKER_ROLE_ARN']
+
+# Create or update model
+try:
+    sm.create_model(
+        ModelName=model_name,
+        PrimaryContainer={'Image': image_uri, 'Mode': 'SingleModel'},
+        ExecutionRoleArn=role_arn
+    )
+    print("✅ Model created.")
+except sm.exceptions.ResourceInUse:
+    print("🔁 Model already exists. Skipping creation.")
+
+# Endpoint config
+endpoint_config_name = f"{model_name}-config"
+try:
+    sm.create_endpoint_config(
+        EndpointConfigName=endpoint_config_name,
+        ProductionVariants=[{
+            'VariantName': 'AllTraffic',
+            'ModelName': model_name,
+            'InitialInstanceCount': 1,
+            'InstanceType': 'ml.t2.medium',
+        }]
+    )
+    print("✅ Endpoint config created.")
+except sm.exceptions.ResourceInUse:
+    print("🔁 Endpoint config already exists. Skipping creation.")
+
+# Endpoint
+try:
+    sm.create_endpoint(
+        EndpointName=endpoint_name,
+        EndpointConfigName=endpoint_config_name
+    )
+    print("🚀 Endpoint creation started.")
+except sm.exceptions.ResourceInUse:
+    print("🔁 Updating existing endpoint...")
+    sm.update_endpoint(
+        EndpointName=endpoint_name,
+        EndpointConfigName=endpoint_config_name
+    )
+    print("✅ Endpoint update initiated.")
+PYTHON
