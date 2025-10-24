@@ -4,7 +4,7 @@
     SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
   run: |
     echo "Deploying image $IMAGE_URI to SageMaker..."
-    
+
     python - <<EOF
 import os
 import boto3
