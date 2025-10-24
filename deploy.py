@@ -13,6 +13,9 @@ def main():
     parser.add_argument("--role-arn", required=True, help="IAM Role ARN for SageMaker execution")
     args = parser.parse_args()
 
+    # 🩹 Fix: Trim any trailing spaces or newline characters from the Role ARN
+    args.role_arn = args.role_arn.strip()
+
     print(f"🚀 Deploying image {args.image_uri} to SageMaker...")
     print(f"📍 Using model name: {args.model_name}")
     print(f"📍 Endpoint name: {args.endpoint_name}")
@@ -20,7 +23,7 @@ def main():
 
     sm = boto3.client("sagemaker", region_name=args.region)
 
-    # Step 1: Delete old endpoint and model if they exist (optional safety cleanup)
+    # Step 1: Delete old endpoint and model if they exist (optional cleanup)
     try:
         print("🧹 Checking for existing endpoint or model...")
         sm.delete_endpoint(EndpointName=args.endpoint_name)
