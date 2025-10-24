@@ -1,7 +1,10 @@
 - name: Deploy to SageMaker
+  env:
+    IMAGE_URI: 491085388405.dkr.ecr.us-east-1.amazonaws.com/my-sagemaker-image:latest
+    SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
   run: |
     echo "Deploying image $IMAGE_URI to SageMaker..."
-    
+
     python - <<EOF
 import os
 import boto3
@@ -56,6 +59,3 @@ except sm.exceptions.ResourceInUse:
     )
     print("✅ Endpoint update initiated.")
 EOF
-  env:
-    IMAGE_URI: 491085388405.dkr.ecr.us-east-1.amazonaws.com/my-sagemaker-image:latest
-    SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
