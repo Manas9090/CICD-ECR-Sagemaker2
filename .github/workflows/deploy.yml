@@ -7,7 +7,7 @@
     SAGEMAKER_ENDPOINT_NAME: ${{ env.SAGEMAKER_ENDPOINT_NAME }}
   run: |
     echo "Deploying image $IMAGE_URI to SageMaker..."
-python - <<PYTHON
+    python - <<PYTHON
 import os
 import boto3
 
