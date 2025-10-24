@@ -7,25 +7,4 @@
     SAGEMAKER_ENDPOINT_NAME: ${{ env.SAGEMAKER_ENDPOINT_NAME }}
   run: |
     echo "Deploying image $IMAGE_URI to SageMaker..."
-python - <<PYTHON
-import os
-import boto3
-
-sm = boto3.client('sagemaker', region_name=os.environ['AWS_REGION'])
-
-model_name = os.environ['SAGEMAKER_MODEL_NAME']
-endpoint_name = os.environ['SAGEMAKER_ENDPOINT_NAME']
-image_uri = os.environ['IMAGE_URI']
-role_arn = os.environ['SAGEMAKER_ROLE_ARN']
-
-# Create or update model
-try:
-    sm.create_model(
-        ModelName=model_name,
-        PrimaryContainer={'Image': image_uri, 'Mode': 'SingleModel'},
-        ExecutionRoleArn=role_arn
-    )
-    print("✅ Model created.")
-except sm.exceptions.ResourceInUse:
-    print("🔁 Model already exists. Skipping creation.")
-PYTHON
+    python deploy.py
