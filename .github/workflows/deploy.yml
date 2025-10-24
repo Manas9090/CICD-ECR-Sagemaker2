@@ -39,11 +39,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # ✅ Fixed deployment step
       - name: Deploy to SageMaker
         env:
           IMAGE_URI: ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
-          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
           AWS_REGION: ${{ env.AWS_REGION }}
           SAGEMAKER_MODEL_NAME: ${{ env.SAGEMAKER_MODEL_NAME }}
           SAGEMAKER_ENDPOINT_NAME: ${{ env.SAGEMAKER_ENDPOINT_NAME }}
-        run: python deploy.py
+        run: |
+          echo "🚀 Deploying model to SageMaker..."
+          python deploy.py \
+            --image-uri "${IMAGE_URI}" \
+            --region "${AWS_REGION}" \
+            --model-name "${SAGEMAKER_MODEL_NAME}" \
+            --endpoint-name "${SAGEMAKER_ENDPOINT_NAME}" \
+            --role-arn "${{ secrets.SAGEMAKER_ROLE_ARN }}"
