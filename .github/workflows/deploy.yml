@@ -9,6 +9,8 @@ on:
 jobs:
   build-train-deploy:
     runs-on: ubuntu-latest
+
+    # Global environment variables
     env:
       AWS_REGION: us-east-1
       IMAGE_TAG: latest
@@ -16,22 +18,27 @@ jobs:
       SAGEMAKER_ENDPOINT_NAME: iris-endpoint
 
     steps:
+      # Step 1: Checkout the repo
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Step 3: Install Python dependencies
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install boto3 awscli scikit-learn joblib
 
+      # Step 4: Train the model
       - name: Train the model
         run: python train.py
 
+      # Step 5: Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -39,18 +46,33 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ✅ Fixed deployment step
+      # Step 6: Login to Amazon ECR
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${{ secrets.ECR_URI }} | cut -d '/' -f1
+
+      # Step 7: Build and push Docker image
+      - name: Build and push Docker image
+        run: |
+          IMAGE_URI=${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
+          echo "Building Docker image $IMAGE_URI..."
+          docker build -t $IMAGE_URI .
+          echo "Pushing Docker image $IMAGE_URI..."
+          docker push $IMAGE_URI
+
+      # Step 8: Deploy Docker image to SageMaker
       - name: Deploy to SageMaker
         env:
           IMAGE_URI: ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
+          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
           AWS_REGION: ${{ env.AWS_REGION }}
           SAGEMAKER_MODEL_NAME: ${{ env.SAGEMAKER_MODEL_NAME }}
           SAGEMAKER_ENDPOINT_NAME: ${{ env.SAGEMAKER_ENDPOINT_NAME }}
         run: |
           echo "🚀 Deploying model to SageMaker..."
           python deploy.py \
-            --image-uri "${IMAGE_URI}" \
-            --region "${AWS_REGION}" \
-            --model-name "${SAGEMAKER_MODEL_NAME}" \
-            --endpoint-name "${SAGEMAKER_ENDPOINT_NAME}" \
-            --role-arn "${{ secrets.SAGEMAKER_ROLE_ARN }}"
+            --image-uri "$IMAGE_URI" \
+            --region "$AWS_REGION" \
+            --model-name "$SAGEMAKER_MODEL_NAME" \
+            --endpoint-name "$SAGEMAKER_ENDPOINT_NAME" \
+            --role-arn "$SAGEMAKER_ROLE_ARN"
