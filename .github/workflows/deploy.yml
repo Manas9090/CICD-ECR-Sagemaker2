@@ -1,18 +1,85 @@
-- name: Deploy to SageMaker
-  env:
-    IMAGE_URI: 491085388405.dkr.ecr.us-east-1.amazonaws.com/my-sagemaker-image:latest
-    SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
-  run: |
-    echo "Deploying image $IMAGE_URI to SageMaker..."
+name: CI/CD SageMaker Deployment via Docker
 
-    python - <<EOF
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-train-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      IMAGE_TAG: latest
+      SAGEMAKER_MODEL_NAME: iris-model
+      SAGEMAKER_ENDPOINT_NAME: iris-endpoint
+
+    steps:
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install boto3 awscli joblib scikit-learn
+
+      # Step 4: Train the model
+      - name: Train the model
+        run: |
+          python train.py
+          ls -R model/
+
+      # Step 5: Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Step 6: Login to Amazon ECR
+      - name: Login to Amazon ECR
+        run: |
+          ECR_REGISTRY=$(echo ${{ secrets.ECR_URI }} | cut -d'/' -f1)
+          echo "Logging into ECR registry $ECR_REGISTRY"
+          aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login \
+            --username AWS --password-stdin $ECR_REGISTRY
+
+      # Step 7: Build and push Docker image to ECR
+      - name: Build and push Docker image
+        run: |
+          IMAGE_URI=${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
+          echo "Building Docker image $IMAGE_URI..."
+          docker build -t $IMAGE_URI .
+          echo "Pushing Docker image $IMAGE_URI..."
+          docker push $IMAGE_URI
+
+      # Step 8: Deploy to SageMaker
+      - name: Deploy to SageMaker
+        env:
+          IMAGE_URI: ${{ secrets.ECR_URI }}:${{ env.IMAGE_TAG }}
+          SAGEMAKER_ROLE_ARN: ${{ secrets.SAGEMAKER_ROLE_ARN }}
+        run: |
+          echo "Deploying image $IMAGE_URI to SageMaker..."
+
+          python - <<EOF
 import os
 import boto3
 
 sm = boto3.client('sagemaker', region_name='us-east-1')
 
-model_name = 'iris-model'
-endpoint_name = 'iris-endpoint'
+model_name = '${{ env.SAGEMAKER_MODEL_NAME }}'
+endpoint_name = '${{ env.SAGEMAKER_ENDPOINT_NAME }}'
 
 # Read IMAGE_URI from environment
 IMAGE_URI = os.environ['IMAGE_URI']
@@ -28,7 +95,7 @@ try:
 except sm.exceptions.ResourceInUse:
     print("🔁 Model already exists. Skipping creation.")
 
-# Endpoint config
+# Create or update endpoint config
 endpoint_config_name = f"{model_name}-config"
 try:
     sm.create_endpoint_config(
@@ -38,13 +105,13 @@ try:
             'ModelName': model_name,
             'InitialInstanceCount': 1,
             'InstanceType': 'ml.t2.medium',
-        }],
+        }]
     )
     print("✅ Endpoint config created.")
 except sm.exceptions.ResourceInUse:
     print("🔁 Endpoint config already exists. Skipping creation.")
 
-# Endpoint
+# Create or update endpoint
 try:
     sm.create_endpoint(
         EndpointName=endpoint_name,
