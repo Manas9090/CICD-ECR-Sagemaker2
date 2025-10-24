@@ -1,56 +1,98 @@
-import os
+import argparse
 import boto3
+import time
+import sys
+import botocore.exceptions
 
-# Get environment variables
-IMAGE_URI = os.environ['IMAGE_URI']
-SAGEMAKER_ROLE_ARN = os.environ['SAGEMAKER_ROLE_ARN']
-REGION = os.environ.get('AWS_REGION', 'us-east-1')
-MODEL_NAME = os.environ.get('SAGEMAKER_MODEL_NAME', 'iris-model')
-ENDPOINT_NAME = os.environ.get('SAGEMAKER_ENDPOINT_NAME', 'iris-endpoint')
+def main():
+    parser = argparse.ArgumentParser(description="Deploy model to SageMaker")
+    parser.add_argument("--image-uri", required=True, help="ECR image URI with tag")
+    parser.add_argument("--region", required=True, help="AWS region")
+    parser.add_argument("--model-name", required=True, help="Name of the SageMaker model")
+    parser.add_argument("--endpoint-name", required=True, help="Name of the SageMaker endpoint")
+    parser.add_argument("--role-arn", required=True, help="IAM Role ARN for SageMaker execution")
+    args = parser.parse_args()
 
-print(f"🚀 Deploying image {IMAGE_URI} to SageMaker...")
+    print(f"🚀 Deploying image {args.image_uri} to SageMaker...")
+    print(f"📍 Using model name: {args.model_name}")
+    print(f"📍 Endpoint name: {args.endpoint_name}")
+    print(f"📍 Role ARN: {args.role_arn}")
 
-# Initialize SageMaker client
-sm = boto3.client('sagemaker', region_name=REGION)
+    sm = boto3.client("sagemaker", region_name=args.region)
 
-# 1. Create or update model
-try:
-    sm.create_model(
-        ModelName=MODEL_NAME,
-        PrimaryContainer={'Image': IMAGE_URI, 'Mode': 'SingleModel'},
-        ExecutionRoleArn=SAGEMAKER_ROLE_ARN
-    )
-    print("✅ Model created.")
-except sm.exceptions.ResourceInUse:
-    print("🔁 Model already exists. Skipping creation.")
+    # Step 1: Delete old endpoint and model if they exist (optional safety cleanup)
+    try:
+        print("🧹 Checking for existing endpoint or model...")
+        sm.delete_endpoint(EndpointName=args.endpoint_name)
+        print("🗑️ Existing endpoint deleted.")
+        time.sleep(10)
 
-# 2. Create or update endpoint config
-endpoint_config_name = f"{MODEL_NAME}-config"
-try:
-    sm.create_endpoint_config(
-        EndpointConfigName=endpoint_config_name,
-        ProductionVariants=[{
-            'VariantName': 'AllTraffic',
-            'ModelName': MODEL_NAME,
-            'InitialInstanceCount': 1,
-            'InstanceType': 'ml.t2.medium',
-        }]
-    )
-    print("✅ Endpoint config created.")
-except sm.exceptions.ResourceInUse:
-    print("🔁 Endpoint config already exists. Skipping creation.")
+        sm.delete_endpoint_config(EndpointConfigName=args.endpoint_name)
+        print("🗑️ Existing endpoint config deleted.")
+        time.sleep(5)
 
-# 3. Create or update endpoint
-try:
-    sm.create_endpoint(
-        EndpointName=ENDPOINT_NAME,
-        EndpointConfigName=endpoint_config_name
-    )
-    print("🚀 Endpoint creation started.")
-except sm.exceptions.ResourceInUse:
-    print("🔁 Updating existing endpoint...")
-    sm.update_endpoint(
-        EndpointName=ENDPOINT_NAME,
-        EndpointConfigName=endpoint_config_name
-    )
-    print("✅ Endpoint update initiated.")
+        sm.delete_model(ModelName=args.model_name)
+        print("🗑️ Existing model deleted.")
+        time.sleep(5)
+
+    except botocore.exceptions.ClientError as e:
+        if "Could not find" in str(e):
+            print("✅ No existing endpoint or model found, continuing...")
+        else:
+            print(f"⚠️ Warning during cleanup: {e}")
+
+    # Step 2: Create SageMaker model
+    try:
+        print("📦 Creating SageMaker model...")
+        sm.create_model(
+            ModelName=args.model_name,
+            PrimaryContainer={
+                "Image": args.image_uri,
+                "Mode": "SingleModel",
+            },
+            ExecutionRoleArn=args.role_arn,
+        )
+        print("✅ Model created successfully!")
+    except botocore.exceptions.ClientError as e:
+        print(f"❌ Failed to create model: {e}")
+        sys.exit(1)
+
+    # Step 3: Create Endpoint Configuration
+    try:
+        print("⚙️ Creating endpoint configuration...")
+        sm.create_endpoint_config(
+            EndpointConfigName=args.endpoint_name,
+            ProductionVariants=[
+                {
+                    "VariantName": "AllTraffic",
+                    "ModelName": args.model_name,
+                    "InitialInstanceCount": 1,
+                    "InstanceType": "ml.m5.large",
+                }
+            ],
+        )
+        print("✅ Endpoint configuration created!")
+    except botocore.exceptions.ClientError as e:
+        print(f"❌ Failed to create endpoint config: {e}")
+        sys.exit(1)
+
+    # Step 4: Create Endpoint
+    try:
+        print("🚀 Deploying endpoint (this may take several minutes)...")
+        sm.create_endpoint(
+            EndpointName=args.endpoint_name,
+            EndpointConfigName=args.endpoint_name,
+        )
+
+        # Optional: Wait until endpoint is InService
+        print("⏳ Waiting for endpoint to become InService...")
+        waiter = sm.get_waiter("endpoint_in_service")
+        waiter.wait(EndpointName=args.endpoint_name)
+        print("✅ Endpoint deployed and InService!")
+
+    except botocore.exceptions.ClientError as e:
+        print(f"❌ Failed to create endpoint: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
