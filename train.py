@@ -32,3 +32,4 @@ if __name__ == "__main__":
     print("🚀 Starting training process...")
     train_and_save_model()
     print("🎉 Training complete! Model ready for Docker build.")
+
